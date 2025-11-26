@@ -1,0 +1,381 @@
+# Quick Reference Guide
+
+## All Commands in Order
+
+### 1. Add Helm Repositories
+```bash
+helm repo add isovalent https://helm.isovalent.com
+helm repo add splunk-otel-collector-chart https://signalfx.github.io/splunk-otel-collector-chart
+helm repo update
+```
+
+### 2. Create Cluster Configuration Files
+
+**cluster.yaml:**
+```bash
+cat > cluster.yaml <<EOF
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: isovalent-demo
+  region: us-east-1
+  version: "1.30"
+iam:
+  withOIDC: true
+addonsConfig:
+  disableDefaultAddons: true
+addons:
+- name: coredns
+EOF
+```
+
+### 3. Create EKS Cluster
+```bash
+eksctl create cluster -f cluster.yaml
+aws eks update-kubeconfig --name isovalent-demo --region us-east-1
+```
+
+### 4. Get API Server Endpoint
+```bash
+aws eks describe-cluster --name isovalent-demo --region us-east-1 --query 'cluster.endpoint' --output text
+```
+
+### 5. Install Prometheus CRDs
+```bash
+kubectl apply -f https://github.com/prometheus-operator/prometheus-operator/releases/download/v0.68.0/stripped-down-crds.yaml
+```
+
+### 6. Create Cilium Values File
+
+**Replace `<YOUR-EKS-API-SERVER-ENDPOINT>` with actual endpoint (without https://):**
+
+```bash
+export API_ENDPOINT="<YOUR-EKS-API-SERVER-ENDPOINT>"
+
+cat > cilium-enterprise-values.yaml <<EOF
+debug:
+  enabled: false
+  verbose: ~
+
+cluster:
+  name: isovalent-demo
+  id: 0
+
+eni:
+  enabled: true
+  updateEC2AdapterLimitViaAPI: true
+  awsEnablePrefixDelegation: true
+
+enableIPv4Masquerade: false
+loadBalancer:
+  serviceTopology: true
+
+ipam:
+  mode: eni
+
+routingMode: native
+
+kubeProxyReplacement: "true"
+k8sServiceHost: ${API_ENDPOINT}
+k8sServicePort: 443
+
+tls:
+  ca:
+    certValidityDuration: 3650
+
+hubble:
+  enabled: true
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - dns:labelsContext=source_namespace,destination_namespace
+      - drop:labelsContext=source_namespace,destination_namespace
+      - tcp:labelsContext=source_namespace,destination_namespace
+      - port-distribution:labelsContext=source_namespace,destination_namespace
+      - icmp:labelsContext=source_namespace,destination_namespace;sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity
+      - flow:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity
+      - "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction;sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity"
+      - "policy:sourceContext=app|workload-name|pod|reserved-identity;destinationContext=app|workload-name|pod|dns|reserved-identity;labelsContext=source_namespace,destination_namespace"
+      - flow_export
+    serviceMonitor:
+      enabled: true
+  tls:
+    enabled: true
+    auto:
+      enabled: true
+      method: cronJob
+      certValidityDuration: 1095
+  relay:
+    enabled: true
+    tls:
+      server:
+        enabled: true
+    prometheus:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+  timescape:
+    enabled: true
+
+operator:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+envoy:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+extraConfig:
+  external-dns-proxy: "true"
+
+enterprise:
+  featureGate:
+    approved:
+      - DNSProxyHA
+      - HubbleTimescape
+EOF
+```
+
+### 7. Install Cilium
+```bash
+helm install cilium isovalent/cilium --version 1.18.4 \
+  --namespace kube-system -f cilium-enterprise-values.yaml
+```
+
+### 8. Create Nodegroup
+
+**nodegroup.yaml:**
+```bash
+cat > nodegroup.yaml <<EOF
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: isovalent-demo
+  region: us-east-1
+managedNodeGroups:
+- name: standard
+  instanceType: m5.xlarge
+  desiredCapacity: 2
+  privateNetworking: true
+EOF
+```
+
+```bash
+eksctl create nodegroup -f nodegroup.yaml
+```
+
+### 9. Install Tetragon
+```bash
+helm install tetragon isovalent/tetragon --version 1.18.0 \
+  --namespace tetragon --create-namespace
+```
+
+### 10. Install DNS Proxy HA
+
+**cilium-dns-proxy-ha-values.yaml:**
+```bash
+cat > cilium-dns-proxy-ha-values.yaml <<EOF
+enableCriticalPriorityClass: true
+metrics:
+  serviceMonitor:
+    enabled: true
+EOF
+```
+
+```bash
+helm upgrade -i cilium-dnsproxy isovalent/cilium-dnsproxy --version 1.16.7 \
+  -n kube-system -f cilium-dns-proxy-ha-values.yaml
+```
+
+### 11. Configure Splunk OTel Collector
+
+**Replace placeholders with your Splunk credentials:**
+
+```bash
+export SPLUNK_TOKEN="<YOUR-SPLUNK-ACCESS-TOKEN>"
+export SPLUNK_REALM="<YOUR-SPLUNK-REALM>"
+
+cat > splunk-otel-isovalent.yaml <<EOF
+agent:
+  config:
+    extensions:
+      k8s_observer:
+        auth_type: serviceAccount
+        observe_pods: true
+    receivers:
+      kubeletstats:
+        insecure_skip_verify: true
+      prometheus/isovalent_cilium:
+        config:
+          scrape_configs:
+          - job_name: 'cilium_metrics_9962'
+            metrics_path: /metrics
+            kubernetes_sd_configs:
+            - role: pod
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_k8s_app]
+              action: keep
+              regex: cilium
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: \${__meta_kubernetes_pod_ip}:9962
+            - target_label: job
+              replacement: 'cilium_metrics_9962'
+          - job_name: 'hubble_metrics_9965'
+            metrics_path: /metrics
+            kubernetes_sd_configs:
+            - role: pod
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_k8s_app]
+              action: keep
+              regex: cilium
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: \${__meta_kubernetes_pod_ip}:9965
+            - target_label: job
+              replacement: 'hubble_metrics_9965'
+      prometheus/isovalent_envoy:
+        config:
+          scrape_configs:
+          - job_name: 'envoy_metrics_9964'
+            metrics_path: /metrics
+            kubernetes_sd_configs:
+            - role: pod
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_k8s_app]
+              action: keep
+              regex: cilium-envoy
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: \${__meta_kubernetes_pod_ip}:9964
+            - target_label: job
+              replacement: 'cilium_metrics_9964'
+      prometheus/isovalent_operator:
+        config:
+          scrape_configs:
+          - job_name: 'cilium_operator_metrics_9963'
+            metrics_path: /metrics
+            kubernetes_sd_configs:
+            - role: pod
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_io_cilium_app]
+              action: keep
+              regex: operator
+            - target_label: job
+              replacement: 'cilium_metrics_9963'
+      prometheus/isovalent_tetragon:
+        config:
+          scrape_configs:
+          - job_name: 'tetragon_metrics_2112'
+            metrics_path: /metrics
+            kubernetes_sd_configs:
+            - role: pod
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: tetragon
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: \${__meta_kubernetes_pod_ip}:2112
+            - target_label: job
+              replacement: 'tetragon_metrics_2112'
+    service:
+      pipelines:
+        metrics:
+          receivers:
+          - prometheus/isovalent_cilium
+          - prometheus/isovalent_envoy
+          - prometheus/isovalent_operator
+          - prometheus/isovalent_tetragon
+          - hostmetrics
+          - kubeletstats
+          - otlp
+autodetect:
+  prometheus: true
+clusterName: isovalent-demo
+splunkObservability:
+  accessToken: ${SPLUNK_TOKEN}
+  realm: ${SPLUNK_REALM}
+EOF
+```
+
+### 12. Install Splunk OTel Collector
+```bash
+helm upgrade --install splunk-otel-collector \
+  splunk-otel-collector-chart/splunk-otel-collector \
+  -n otel-splunk --create-namespace \
+  -f splunk-otel-isovalent.yaml
+```
+
+## Verification Commands
+
+### Check All Components
+```bash
+kubectl get nodes
+kubectl get pods -n kube-system | grep -E "(cilium|hubble)"
+kubectl get pods -n tetragon
+kubectl get pods -n otel-splunk
+```
+
+### Test Metrics Endpoints
+```bash
+kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | head -20
+kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | head -20
+kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | head -20
+```
+
+### Check OTel Collector Logs
+```bash
+kubectl logs -n otel-splunk -l app=splunk-otel-collector,component=otel-collector-agent --tail=100 | grep -i "cilium\|hubble\|tetragon"
+```
+
+## Import Dashboards
+
+### Dashboard Import Steps
+1. Log in to Splunk Observability Cloud
+2. Navigate to **Dashboards** → **Create** → **Import**
+3. Upload dashboard JSON files from `examples/` directory:
+   - `Cilium by Isovalent.json`
+   - `Hubble by Isovalent.json`
+4. Click **Import** for each dashboard
+5. (Optional) Move dashboards to a dashboard group (e.g., "Isovalent")
+
+### Available Dashboards
+- **Cilium by Isovalent**: Agent health, ENI allocation, BPF maps, operator status
+- **Hubble by Isovalent**: Network flows, DNS queries, dropped packets, HTTP metrics
+
+## Cleanup Commands
+
+```bash
+# Delete nodegroup
+eksctl delete nodegroup --cluster=isovalent-demo --name=standard --region=us-east-1
+
+# Delete cluster
+eksctl delete cluster --name=isovalent-demo --region=us-east-1
+```
+
+## Useful Troubleshooting Commands
+
+```bash
+# Check Cilium status
+kubectl exec -n kube-system ds/cilium -- cilium status
+
+# Check Cilium connectivity
+kubectl exec -n kube-system ds/cilium -- cilium connectivity test
+
+# View OTel configuration
+kubectl get configmap -n otel-splunk splunk-otel-collector-otel-agent -o yaml | grep -A 5 "prometheus/isovalent"
+
+# Check service discovery
+kubectl get pods -n kube-system -l k8s-app=cilium -o wide
+kubectl get pods -n tetragon -l app.kubernetes.io/name=tetragon -o wide
+```
