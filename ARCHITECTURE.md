@@ -6,6 +6,113 @@ This document describes the architecture of the Isovalent Enterprise Platform in
 
 ## High-Level Architecture Diagram
 
+### Mermaid Diagram
+
+```mermaid
+graph TB
+    subgraph AWS["Amazon Web Services"]
+        subgraph EKS["EKS Cluster - isovalent-demo"]
+            subgraph CP["Control Plane"]
+                API["Kubernetes API Server"]
+            end
+            
+            subgraph NG["Worker Nodes (m5.xlarge)"]
+                subgraph Node1["Node 1"]
+                    CA1["Cilium Agent<br/>(eBPF + ENI)<br/>:9962"]
+                    CE1["Cilium Envoy<br/>:9964"]
+                    HA1["Hubble<br/>:9965"]
+                    TE1["Tetragon<br/>:2112"]
+                    OC1["OTel Collector<br/>Agent"]
+                    PODS1["Application Pods"]
+                end
+                
+                subgraph Node2["Node 2"]
+                    CA2["Cilium Agent<br/>(eBPF + ENI)<br/>:9962"]
+                    CE2["Cilium Envoy<br/>:9964"]
+                    HA2["Hubble<br/>:9965"]
+                    TE2["Tetragon<br/>:2112"]
+                    OC2["OTel Collector<br/>Agent"]
+                    PODS2["Application Pods"]
+                end
+            end
+            
+            subgraph CS["Cluster Services"]
+                CO["Cilium Operator<br/>:9963"]
+                HR["Hubble Relay"]
+                HT["Hubble Timescape<br/>(Historical Flows)"]
+                DNS["DNS Proxy HA"]
+                CD["CoreDNS"]
+            end
+        end
+        
+        subgraph VPC["VPC Networking"]
+            ENI["Elastic Network Interfaces<br/>(Prefix Delegation)"]
+        end
+    end
+    
+    subgraph Splunk["Splunk Observability Cloud"]
+        IM["Infrastructure Monitoring"]
+        APM["APM"]
+        DB["Dashboards"]
+    end
+    
+    %% Data Flow Connections
+    CA1 -.->|"Scrape :9962"| OC1
+    CE1 -.->|"Scrape :9964"| OC1
+    HA1 -.->|"Scrape :9965"| OC1
+    TE1 -.->|"Scrape :2112"| OC1
+    
+    CA2 -.->|"Scrape :9962"| OC2
+    CE2 -.->|"Scrape :9964"| OC2
+    HA2 -.->|"Scrape :9965"| OC2
+    TE2 -.->|"Scrape :2112"| OC2
+    
+    CO -.->|"Scrape :9963"| OC1
+    CO -.->|"Scrape :9963"| OC2
+    
+    OC1 ==>|"OTLP/HTTP<br/>Metrics"| IM
+    OC2 ==>|"OTLP/HTTP<br/>Metrics"| IM
+    
+    IM --> DB
+    
+    %% Networking Connections
+    CA1 <-->|"Manages"| ENI
+    CA2 <-->|"Manages"| ENI
+    ENI -->|"VPC IPs"| PODS1
+    ENI -->|"VPC IPs"| PODS2
+    
+    %% Hubble Flow Aggregation
+    HA1 -->|"Flow Data"| HR
+    HA2 -->|"Flow Data"| HR
+    HR --> HT
+    
+    %% API Communication
+    CA1 -.->|"kube-proxy<br/>replacement"| API
+    CA2 -.->|"kube-proxy<br/>replacement"| API
+    CO --> API
+    
+    %% DNS
+    PODS1 --> DNS
+    PODS2 --> DNS
+    DNS --> CD
+    
+    classDef cilium fill:#f9f,stroke:#333,stroke-width:2px
+    classDef hubble fill:#9cf,stroke:#333,stroke-width:2px
+    classDef tetragon fill:#fcf,stroke:#333,stroke-width:2px
+    classDef otel fill:#ff9,stroke:#333,stroke-width:2px
+    classDef splunk fill:#6f6,stroke:#333,stroke-width:2px
+    classDef aws fill:#fa0,stroke:#333,stroke-width:1px
+    
+    class CA1,CA2,CO,CE1,CE2 cilium
+    class HA1,HA2,HR,HT hubble
+    class TE1,TE2 tetragon
+    class OC1,OC2 otel
+    class IM,APM,DB splunk
+    class ENI aws
+```
+
+### ASCII Diagram
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          Splunk Observability Cloud                         │
