@@ -13,7 +13,7 @@ This directory contains the configuration files used during the deployment of Is
 - **cilium-dns-proxy-ha-values.yaml** - DNS Proxy HA Helm values
 
 ### Splunk OpenTelemetry Configuration
-- **splunk-otel-isovalent.yaml** - Splunk OTel Collector Helm values with Isovalent metrics receivers and metric filtering
+- **splunk-otel-isovalent.yaml** - Splunk OpenTelemetry Collector Helm values with Isovalent metrics receivers and metric filtering
 
 ### Splunk Observability Cloud Dashboards
 - **Cilium by Isovalent.json** - Pre-built dashboard for Cilium metrics (agent status, ENI allocation, BPF map pressure)
@@ -41,7 +41,7 @@ kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed
 ### 2. Splunk Access Token
 **File:** `splunk-otel-isovalent.yaml`  
 **Placeholder:** `<YOUR-SPLUNK-ACCESS-TOKEN>`  
-**Location:** Line 100 (`accessToken`)
+**Field:** `splunkObservability.accessToken`
 
 **How to get it:**
 1. Log into Splunk Observability Cloud
@@ -53,7 +53,7 @@ kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed
 ### 3. Splunk Realm
 **File:** `splunk-otel-isovalent.yaml`  
 **Placeholder:** `<YOUR-SPLUNK-REALM>`  
-**Location:** Line 103 (`realm`)
+**Field:** `splunkObservability.realm`
 
 **How to find it:**
 1. Log into Splunk Observability Cloud
@@ -89,16 +89,16 @@ helm upgrade --install cilium-dns-proxy-ha isovalent/cilium-dns-proxy-ha \
   --namespace kube-system \
   -f examples/cilium-dns-proxy-ha-values.yaml
 
-# Install Splunk OTel Collector
+# Install Splunk OpenTelemetry Collector
 helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
-  --namespace splunk-otel \
+  --namespace otel-splunk \
   --create-namespace \
   -f examples/splunk-otel-isovalent.yaml
 ```
 
 ## Metric Filtering
 
-The `splunk-otel-isovalent.yaml` file includes a `filter/includemetrics` processor that limits which metrics are sent to Splunk Observability Cloud. This is essential to:
+The `splunk-otel-isovalent.yaml` file includes a `filter/includemetrics` processor that limits which metrics are sent to Splunk Observability Cloud. This processor uses **strict include semantics**: only metrics explicitly listed in `metric_names` are forwarded; all other metrics are dropped. This is essential to:
 
 - **Prevent metric explosion**: Cilium, Hubble, and Tetragon can generate hundreds of metrics
 - **Control costs**: Splunk charges based on metrics volume (MTS - Metric Time Series)

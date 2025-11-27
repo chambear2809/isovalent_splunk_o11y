@@ -196,7 +196,7 @@ helm upgrade -i cilium-dnsproxy isovalent/cilium-dnsproxy --version 1.16.7 \
   -n kube-system -f cilium-dns-proxy-ha-values.yaml
 ```
 
-### 11. Configure Splunk OTel Collector
+### 11. Configure Splunk OpenTelemetry Collector
 
 **Replace placeholders with your Splunk credentials:**
 
@@ -204,7 +204,7 @@ helm upgrade -i cilium-dnsproxy isovalent/cilium-dnsproxy --version 1.16.7 \
 export SPLUNK_TOKEN="<YOUR-SPLUNK-ACCESS-TOKEN>"
 export SPLUNK_REALM="<YOUR-SPLUNK-REALM>"
 
-cat > splunk-otel-isovalent.yaml <<EOF
+cat > examples/splunk-otel-isovalent.yaml <<EOF
 agent:
   config:
     extensions:
@@ -288,6 +288,34 @@ agent:
               replacement: \${__meta_kubernetes_pod_ip}:2112
             - target_label: job
               replacement: 'tetragon_metrics_2112'
+    processors:
+      # Filter metrics to prevent overwhelming Splunk Observability Cloud
+      filter/includemetrics:
+        metrics:
+          include:
+            match_type: strict
+            metric_names:
+            # Kubernetes metrics
+            - container.cpu.usage
+            - container.memory.rss
+            - k8s.container.restarts
+            - k8s.pod.phase
+            # Cilium metrics
+            - cilium_endpoint_state
+            - cilium_bpf_map_ops_total
+            - cilium_policy_l7_total
+            # Hubble metrics
+            - hubble_flows_processed_total
+            - hubble_drop_total
+            - hubble_dns_queries_total
+            - hubble_http_requests_total
+            # Tetragon metrics
+            - tetragon_dns_total
+            - tetragon_http_response_total
+      resourcedetection:
+        detectors: [system]
+        system:
+          hostname_sources: [os]
     service:
       pipelines:
         metrics:
@@ -299,21 +327,33 @@ agent:
           - hostmetrics
           - kubeletstats
           - otlp
+          processors:
+          - filter/includemetrics
+          - resourcedetection
 autodetect:
   prometheus: true
 clusterName: isovalent-demo
 splunkObservability:
   accessToken: ${SPLUNK_TOKEN}
   realm: ${SPLUNK_REALM}
+  profilingEnabled: true
+cloudProvider: aws
+distribution: eks
+gateway:
+  enabled: true
+certmanager:
+  enabled: true
+operator:
+  enabled: true
 EOF
 ```
 
-### 12. Install Splunk OTel Collector
+### 12. Install Splunk OpenTelemetry Collector
 ```bash
 helm upgrade --install splunk-otel-collector \
   splunk-otel-collector-chart/splunk-otel-collector \
   -n otel-splunk --create-namespace \
-  -f splunk-otel-isovalent.yaml
+  -f examples/splunk-otel-isovalent.yaml
 ```
 
 ## Verification Commands

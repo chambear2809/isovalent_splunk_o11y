@@ -469,13 +469,13 @@ kubectl rollout status -n kube-system ds/cilium-dnsproxy --watch
 
 ### Step 11: Configure Splunk OpenTelemetry Collector
 
-**Integration Overview:** The Splunk OTel Collector uses Prometheus receivers to scrape metrics from Cilium, Hubble, and Tetragon. Each component exposes metrics on different ports, so we configure separate receivers with Kubernetes service discovery to automatically find pods.
+**Integration Overview:** The Splunk OpenTelemetry Collector uses Prometheus receivers to scrape metrics from Cilium, Hubble, and Tetragon. Each component exposes metrics on different ports, so we configure separate receivers with Kubernetes service discovery to automatically find pods.
 
 **Why separate receivers?** Isovalent components expose metrics on multiple ports within the same pod (e.g., Cilium agent serves both Cilium and Hubble metrics on different ports). Standard Prometheus annotations only support one port per pod, so we explicitly configure each endpoint.
 
 **Metric Filtering:** The configuration includes a `filter/includemetrics` processor that only allows specific metrics to pass through. This is critical to prevent overwhelming Splunk Observability Cloud with the high volume of metrics that Cilium, Hubble, and Tetragon can generate. The filter uses strict matching on a curated list of the most valuable metrics for monitoring network performance, security, and troubleshooting.
 
-Create `splunk-otel-isovalent.yaml` with your Splunk credentials:
+Use `examples/splunk-otel-isovalent.yaml` as a starting point and update it with your Splunk credentials:
 
 ```yaml
 agent:
@@ -583,7 +583,7 @@ agent:
             - hubble_dns_queries_total
             - hubble_http_requests_total
             # Tetragon metrics
-            - tetragon_process_exec_total
+            - tetragon_dns_total
             - tetragon_http_response_total
       resourcedetection:
         detectors: [system]
@@ -628,13 +628,13 @@ operator:
 
 ### Step 12: Install Splunk OpenTelemetry Collector
 
-Install the collector:
+Install the collector using the example configuration file:
 
 ```bash
 helm upgrade --install splunk-otel-collector \
   splunk-otel-collector-chart/splunk-otel-collector \
   -n otel-splunk --create-namespace \
-  -f splunk-otel-isovalent.yaml
+  -f examples/splunk-otel-isovalent.yaml
 ```
 
 Wait for rollout to complete:
@@ -881,6 +881,8 @@ Splunk Observability Cloud
 - `tetragon_syscalls_*` - System call monitoring (kernel call activity)
 - `tetragon_policy_events_*` - Security policy enforcement actions
 - `tetragon_event_cache_*` - Event cache statistics (buffering performance)
+
+If any of the metrics listed above are not present by default, add them to the `metric_names` list under `processors.filter/includemetrics` in `examples/splunk-otel-isovalent.yaml` so they are forwarded to Splunk.
 
 ## Troubleshooting
 

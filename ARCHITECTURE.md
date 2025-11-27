@@ -335,9 +335,10 @@ Pod A                    Cilium Agent (eBPF)                    Pod B
 
 ### Metrics Integration
 - **ServiceMonitor CRDs**: Cilium uses Prometheus Operator CRDs
-- **Custom Receivers**: Splunk OTel Collector configured with specific receivers
+- **Custom Receivers**: Splunk OpenTelemetry Collector configured with specific receivers
 - **Pod Discovery**: Kubernetes service discovery automatically finds pods
 - **Label-based**: Filters based on Kubernetes labels
+- **Curated Metric Set**: An `filter/includemetrics` processor forwards only a curated subset of high-value metrics to Splunk to control metric volume and cost
 
 ## Security Considerations
 
