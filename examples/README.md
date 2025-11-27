@@ -13,7 +13,7 @@ This directory contains the configuration files used during the deployment of Is
 - **cilium-dns-proxy-ha-values.yaml** - DNS Proxy HA Helm values
 
 ### Splunk OpenTelemetry Configuration
-- **splunk-otel-isovalent.yaml** - Splunk OTel Collector Helm values with Isovalent metrics receivers
+- **splunk-otel-isovalent.yaml** - Splunk OTel Collector Helm values with Isovalent metrics receivers and metric filtering
 
 ### Splunk Observability Cloud Dashboards
 - **Cilium by Isovalent.json** - Pre-built dashboard for Cilium metrics (agent status, ENI allocation, BPF map pressure)
@@ -96,6 +96,34 @@ helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-
   -f examples/splunk-otel-isovalent.yaml
 ```
 
+## Metric Filtering
+
+The `splunk-otel-isovalent.yaml` file includes a `filter/includemetrics` processor that limits which metrics are sent to Splunk Observability Cloud. This is essential to:
+
+- **Prevent metric explosion**: Cilium, Hubble, and Tetragon can generate hundreds of metrics
+- **Control costs**: Splunk charges based on metrics volume (MTS - Metric Time Series)
+- **Focus on key indicators**: Only send metrics that provide actionable insights
+
+**Default filtered metrics include:**
+- Container and pod resource metrics (CPU, memory, restarts)
+- Cilium networking metrics (endpoints, BPF maps, policies, API limiter)
+- Hubble observability metrics (flows, DNS, HTTP, drops)
+- Tetragon security metrics (processes, HTTP, DNS, sockets)
+
+**Customizing the filter:**
+Edit the `metric_names` list under `processors.filter/includemetrics` to add or remove metrics based on your monitoring requirements. Use `kubectl exec` to view available metrics:
+
+```bash
+# View all Cilium metrics
+kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | grep "^cilium_"
+
+# View all Hubble metrics
+kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | grep "^hubble_"
+
+# View all Tetragon metrics
+kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | grep "^tetragon_"
+```
+
 ## Customization
 
 Feel free to modify these files to match your environment:
@@ -104,6 +132,7 @@ Feel free to modify these files to match your environment:
 - Adjust instance types and capacity in `nodegroup.yaml`
 - Modify Hubble metrics in `cilium-enterprise-values.yaml`
 - Update cluster name in `splunk-otel-isovalent.yaml` to match your deployment
+- Customize the metric filter list in `splunk-otel-isovalent.yaml` based on your monitoring needs
 
 ## Security Best Practices
 

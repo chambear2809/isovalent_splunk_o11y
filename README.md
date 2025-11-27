@@ -473,6 +473,8 @@ kubectl rollout status -n kube-system ds/cilium-dnsproxy --watch
 
 **Why separate receivers?** Isovalent components expose metrics on multiple ports within the same pod (e.g., Cilium agent serves both Cilium and Hubble metrics on different ports). Standard Prometheus annotations only support one port per pod, so we explicitly configure each endpoint.
 
+**Metric Filtering:** The configuration includes a `filter/includemetrics` processor that only allows specific metrics to pass through. This is critical to prevent overwhelming Splunk Observability Cloud with the high volume of metrics that Cilium, Hubble, and Tetragon can generate. The filter uses strict matching on a curated list of the most valuable metrics for monitoring network performance, security, and troubleshooting.
+
 Create `splunk-otel-isovalent.yaml` with your Splunk credentials:
 
 ```yaml
@@ -559,6 +561,34 @@ agent:
               replacement: ${__meta_kubernetes_pod_ip}:2112
             - target_label: job
               replacement: 'tetragon_metrics_2112'
+    processors:
+      # Filter metrics to prevent overwhelming Splunk Observability Cloud
+      filter/includemetrics:
+        metrics:
+          include:
+            match_type: strict
+            metric_names:
+            # Kubernetes metrics
+            - container.cpu.usage
+            - container.memory.rss
+            - k8s.container.restarts
+            - k8s.pod.phase
+            # Cilium metrics
+            - cilium_endpoint_state
+            - cilium_bpf_map_ops_total
+            - cilium_policy_l7_total
+            # Hubble metrics
+            - hubble_flows_processed_total
+            - hubble_drop_total
+            - hubble_dns_queries_total
+            - hubble_http_requests_total
+            # Tetragon metrics
+            - tetragon_process_exec_total
+            - tetragon_http_response_total
+      resourcedetection:
+        detectors: [system]
+        system:
+          hostname_sources: [os]
     service:
       pipelines:
         metrics:
@@ -570,17 +600,31 @@ agent:
           - hostmetrics
           - kubeletstats
           - otlp
+          processors:
+          - filter/includemetrics
+          - resourcedetection
 autodetect:
   prometheus: true
 clusterName: isovalent-demo
 splunkObservability:
   accessToken: <YOUR-SPLUNK-ACCESS-TOKEN>
   realm: <YOUR-SPLUNK-REALM>
+  profilingEnabled: true
+cloudProvider: aws
+distribution: eks
+gateway:
+  enabled: true
+certmanager:
+  enabled: true
+operator:
+  enabled: true
 ```
 
 **Important:** Replace:
 - `<YOUR-SPLUNK-ACCESS-TOKEN>` with your actual Splunk Observability Cloud access token
 - `<YOUR-SPLUNK-REALM>` with your realm (e.g., us1, us2, eu0)
+
+**Note:** The metric filter list shown above is abbreviated. The full configuration in `examples/splunk-otel-isovalent.yaml` includes approximately 40 curated metrics across all components. You can customize this list based on your specific monitoring needs.
 
 ### Step 12: Install Splunk OpenTelemetry Collector
 
