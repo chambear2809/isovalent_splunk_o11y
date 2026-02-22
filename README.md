@@ -412,7 +412,7 @@ kubectl get pods -n kube-system | grep -E "(cilium|hubble)"
 
 **Expected Output:**
 - 2 nodes in `Ready` state
-- Cilium pods running (1 per node)
+- Cilium Agents running (1 per node)
 - Hubble relay and timescape running
 - Cilium operator running
 

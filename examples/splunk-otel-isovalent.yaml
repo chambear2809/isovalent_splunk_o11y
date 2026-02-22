@@ -136,6 +136,7 @@ agent:
             - hubble_policy_verdicts_total
             - hubble_tcp_flags_total
             # Include selected Tetragon metrics
+            - tetragon_events_total
             - tetragon_dns_cache_evictions_total
             - tetragon_dns_cache_misses_total
             - tetragon_dns_total
@@ -143,14 +144,17 @@ agent:
             - tetragon_http_stats_latency_bucket
             - tetragon_http_stats_latency_count
             - tetragon_http_stats_latency_sum
+            - tetragon_icmp_datagrams_total
             - tetragon_layer3_event_errors_total
             - tetragon_socket_stats_retransmitsegs_total
+            - tetragon_socket_stats_rxbytes_total
             - tetragon_socket_stats_rxsegs_total
             - tetragon_socket_stats_srtt_count
             - tetragon_socket_stats_srtt_sum
             - tetragon_socket_stats_txbytes_total
             - tetragon_socket_stats_txsegs_total
             - tetragon_socket_stats_udp_retrieve_total
+            - tetragon_socket_stats_udp_rxbytes_total
             - tetragon_socket_stats_udp_txbytes_total
             - tetragon_socket_stats_udp_txsegs_total
       resourcedetection:
@@ -177,6 +181,7 @@ agent:
 autodetect:
   prometheus: true
 clusterName: isovalent-demo
+environment: isovalent-demo
   
 # IMPORTANT: Replace <YOUR-SPLUNK-ACCESS-TOKEN> with your actual Splunk Observability Cloud access token
 # Get it from: Splunk Observability Cloud > Settings > Access Tokens

@@ -1,0 +1,46 @@
+# Tetragon configuration with Enhanced Network Observability enabled
+# Required for Splunk Observability Cloud Network Explorer integration
+
+tetragon:
+  # Enable enhanced network observability features for socket tracking
+  enableNetworkEvents: true
+  
+  # Layer 3 network tracking
+  layer3:
+    tcp:
+      enabled: true
+      rtt:
+        enabled: true
+    udp:
+      enabled: true
+    icmp:
+      enabled: true
+    latency:
+      enabled: true
+  
+  # DNS tracking
+  dns:
+    enabled: true
+  
+  # Enable HTTP tracking for L7 visibility
+  # Note: Requires Tetragon Enterprise for full HTTP tracking
+  # enableHttp: true
+  
+  # Metrics configuration
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  
+  # Export configuration
+  export:
+    mode: stdout
+    
+  # Filter out noise from system namespaces (adjust as needed)
+  # tenant-jobs namespace is explicitly allowed for monitoring
+  exportDenylist: |
+    {"health_check":true}
+    {"namespace":["cilium", "tetragon", "kube-system", "otel-splunk", "default", "kube-node-lease", "kube-public"]}
+  
+  # Metrics label filter - include essential labels for Network Explorer
+  metricsLabelFilter: "namespace,workload,pod,binary,protocol,destination"
