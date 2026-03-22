@@ -1,0 +1,4 @@
+interface:
+  display_name: "Isovalent Lab"
+  short_description: "Deploy Cilium, Hubble, and Tetragon"
+  default_prompt: "Use $deploy-isovalent-lab to install, adapt, or validate the Isovalent side of this repo on Kubernetes or OpenShift."

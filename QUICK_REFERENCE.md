@@ -7,6 +7,11 @@
 helm repo add isovalent https://helm.isovalent.com
 helm repo add splunk-otel-collector-chart https://signalfx.github.io/splunk-otel-collector-chart
 helm repo update
+export API_ENDPOINT="$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed 's|https://||')"
+export CILIUM_CHART_VERSION="$(helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}')"
+export CILIUM_DNSPROXY_CHART_VERSION="$(helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}')"
+export TETRAGON_CHART_VERSION="$(helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}')"
+export SPLUNK_OTEL_CHART_VERSION="$(helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}')"
 ```
 
 ### 2. Create Cluster Configuration Files
@@ -147,9 +152,12 @@ EOF
 
 ### 7. Install Cilium
 ```bash
-helm install cilium isovalent/cilium --version 1.18.4 \
-  --namespace kube-system -f cilium-enterprise-values.yaml
+helm upgrade --install cilium isovalent/cilium --version "${CILIUM_CHART_VERSION}" \
+  --namespace kube-system -f cilium-enterprise-values.yaml \
+  --set k8sServiceHost="${API_ENDPOINT}"
 ```
+
+Do not use `--reuse-values` when moving `cilium` or `cilium-dnsproxy` to a newer published chart. Reapply the intended values file so Helm does not preserve older computed image tags.
 
 ### 8. Create Nodegroup
 
@@ -175,13 +183,15 @@ eksctl create nodegroup -f nodegroup.yaml
 
 ### 9. Install Tetragon
 ```bash
-helm install tetragon isovalent/tetragon --version 1.18.0 \
+helm upgrade --install tetragon isovalent/tetragon --version "${TETRAGON_CHART_VERSION}" \
   --namespace tetragon --create-namespace
 ```
 
 ### 10. Install DNS Proxy HA
 
 **cilium-dns-proxy-ha-values.yaml:**
+
+The values file keeps the historical repo filename, but the live Helm release is `cilium-dnsproxy`.
 ```bash
 cat > cilium-dns-proxy-ha-values.yaml <<EOF
 enableCriticalPriorityClass: true
@@ -192,7 +202,7 @@ EOF
 ```
 
 ```bash
-helm upgrade -i cilium-dnsproxy isovalent/cilium-dnsproxy --version 1.16.7 \
+helm upgrade --install cilium-dnsproxy isovalent/cilium-dnsproxy --version "${CILIUM_DNSPROXY_CHART_VERSION}" \
   -n kube-system -f cilium-dns-proxy-ha-values.yaml
 ```
 
@@ -333,6 +343,7 @@ agent:
 autodetect:
   prometheus: true
 clusterName: isovalent-demo
+environment: isovalent-demo
 splunkObservability:
   accessToken: ${SPLUNK_TOKEN}
   realm: ${SPLUNK_REALM}
@@ -352,8 +363,16 @@ EOF
 ```bash
 helm upgrade --install splunk-otel-collector \
   splunk-otel-collector-chart/splunk-otel-collector \
+  --version "${SPLUNK_OTEL_CHART_VERSION}" \
   -n otel-splunk --create-namespace \
   -f examples/splunk-otel-isovalent.yaml
+
+helm status splunk-otel-collector -n otel-splunk
+kubectl get deploy,ds,svc,cm -n otel-splunk
+kubectl get instrumentation -A
+kubectl get ds cilium -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
+kubectl get ds cilium-dnsproxy -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
+kubectl get deploy splunk-otel-collector splunk-otel-collector-operator -n otel-splunk -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{end}'
 ```
 
 ## Verification Commands
@@ -361,9 +380,14 @@ helm upgrade --install splunk-otel-collector \
 ### Check All Components
 ```bash
 kubectl get nodes
-kubectl get pods -n kube-system | grep -E "(cilium|hubble)"
-kubectl get pods -n tetragon
-kubectl get pods -n otel-splunk
+helm status cilium -n kube-system
+helm status cilium-dnsproxy -n kube-system
+helm status tetragon -n tetragon
+helm status splunk-otel-collector -n otel-splunk
+kubectl get pods,ds,deploy,svc -n kube-system
+kubectl get pods,ds,deploy,svc -n tetragon
+kubectl get pods,deploy,ds,svc,cm -n otel-splunk
+kubectl get instrumentation -A
 ```
 
 ### Test Metrics Endpoints
@@ -414,6 +438,16 @@ kubectl exec -n kube-system ds/cilium -- cilium connectivity test
 
 # View OTel configuration
 kubectl get configmap -n otel-splunk splunk-otel-collector-otel-agent -o yaml | grep -A 5 "prometheus/isovalent"
+
+# Check Helm release state before reinstalling the collector
+helm status splunk-otel-collector -n otel-splunk
+
+# Re-resolve latest published chart versions before upgrading
+helm repo update
+helm search repo isovalent/cilium --versions | head -n 3
+helm search repo isovalent/cilium-dnsproxy --versions | head -n 3
+helm search repo isovalent/tetragon --versions | head -n 3
+helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | head -n 3
 
 # Check service discovery
 kubectl get pods -n kube-system -l k8s-app=cilium -o wide

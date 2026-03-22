@@ -1,0 +1,4 @@
+interface:
+  display_name: "Splunk O11y Lab"
+  short_description: "Deploy Splunk OTel and dashboards"
+  default_prompt: "Use $deploy-splunk-o11y-lab to install, adapt, or validate the Splunk Observability side of this repo on Kubernetes or OpenShift."

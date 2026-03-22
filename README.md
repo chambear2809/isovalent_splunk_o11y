@@ -174,7 +174,15 @@ helm repo add splunk-otel-collector-chart https://signalfx.github.io/splunk-otel
 
 # Update Helm repositories
 helm repo update
+
+# Resolve the latest chart versions from the official repos
+export CILIUM_CHART_VERSION="$(helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}')"
+export CILIUM_DNSPROXY_CHART_VERSION="$(helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}')"
+export TETRAGON_CHART_VERSION="$(helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}')"
+export SPLUNK_OTEL_CHART_VERSION="$(helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}')"
 ```
+
+Re-run `helm repo update` and these exports before every upgrade. That keeps the install commands aligned with the latest versions published in the official Helm repos instead of relying on stale pins in the docs.
 
 ### Step 2: Create EKS Cluster Configuration
 
@@ -349,7 +357,11 @@ enterprise:
       - HubbleTimescape
 ```
 
-**Important:** Replace `<YOUR-EKS-API-SERVER-ENDPOINT>` with the actual endpoint from Step 4 (without `https://` prefix).
+**Important:** Replace `<YOUR-EKS-API-SERVER-ENDPOINT>` with the actual endpoint from Step 4 (without `https://` prefix), or export it at install time:
+
+```bash
+export EKS_API_ENDPOINT="$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed 's|https://||')"
+```
 
 **Understanding the Configuration:**
 
@@ -366,8 +378,9 @@ enterprise:
 Install Cilium using Helm:
 
 ```bash
-helm install cilium isovalent/cilium --version 1.18.4 \
-  --namespace kube-system -f cilium-enterprise-values.yaml
+helm upgrade --install cilium isovalent/cilium --version "${CILIUM_CHART_VERSION}" \
+  --namespace kube-system -f cilium-enterprise-values.yaml \
+  --set k8sServiceHost="${EKS_API_ENDPOINT}"
 ```
 
 **Note:** The installation may initially fail waiting for nodes. This is expected - proceed to the next step.
@@ -429,7 +442,7 @@ kubectl get pods -n kube-system | grep -E "(cilium|hubble)"
 Install Tetragon for runtime security:
 
 ```bash
-helm install tetragon isovalent/tetragon --version 1.18.0 \
+helm upgrade --install tetragon isovalent/tetragon --version "${TETRAGON_CHART_VERSION}" \
   --namespace tetragon --create-namespace
 ```
 
@@ -447,6 +460,8 @@ kubectl get pods -n tetragon
 
 Create `cilium-dns-proxy-ha-values.yaml`:
 
+**Note:** The values file keeps the repo's historical filename, but the live Helm release is `cilium-dnsproxy`.
+
 ```yaml
 enableCriticalPriorityClass: true
 metrics:
@@ -457,7 +472,7 @@ metrics:
 Install DNS Proxy HA:
 
 ```bash
-helm upgrade -i cilium-dnsproxy isovalent/cilium-dnsproxy --version 1.16.7 \
+helm upgrade --install cilium-dnsproxy isovalent/cilium-dnsproxy --version "${CILIUM_DNSPROXY_CHART_VERSION}" \
   -n kube-system -f cilium-dns-proxy-ha-values.yaml
 ```
 
@@ -465,6 +480,7 @@ Verify:
 
 ```bash
 kubectl rollout status -n kube-system ds/cilium-dnsproxy --watch
+kubectl get svc -n kube-system cilium-dnsproxy
 ```
 
 ### Step 11: Configure Splunk OpenTelemetry Collector
@@ -606,6 +622,7 @@ agent:
 autodetect:
   prometheus: true
 clusterName: isovalent-demo
+environment: isovalent-demo
 splunkObservability:
   accessToken: <YOUR-SPLUNK-ACCESS-TOKEN>
   realm: <YOUR-SPLUNK-REALM>
@@ -633,6 +650,7 @@ Install the collector using the example configuration file:
 ```bash
 helm upgrade --install splunk-otel-collector \
   splunk-otel-collector-chart/splunk-otel-collector \
+  --version "${SPLUNK_OTEL_CHART_VERSION}" \
   -n otel-splunk --create-namespace \
   -f examples/splunk-otel-isovalent.yaml
 ```
@@ -642,6 +660,60 @@ Wait for rollout to complete:
 ```bash
 kubectl rollout status daemonset/splunk-otel-collector-agent -n otel-splunk --timeout=60s
 ```
+
+Inspect the chart-managed runtime footprint:
+
+```bash
+helm status splunk-otel-collector -n otel-splunk
+kubectl get deploy,ds,svc,cm -n otel-splunk
+kubectl get instrumentation -A
+```
+
+You should see:
+
+- `Deployment/splunk-otel-collector`
+- `DaemonSet/splunk-otel-collector-agent`
+- `Deployment/splunk-otel-collector-k8s-cluster-receiver`
+- `Deployment/splunk-otel-collector-operator`
+- Cert-manager resources
+- One or more `Instrumentation` resources
+
+`kubectl get opentelemetrycollectors -A` may still return no resources because this repo uses the Helm chart's chart-managed collector layout instead of `OpenTelemetryCollector` custom resources.
+
+If `helm status splunk-otel-collector -n otel-splunk` reports `failed` while these workloads are still healthy, inspect the operator webhook and cert-manager resources before reinstalling. A failed upgrade can leave the previous collector stack running.
+
+### Upgrade Maintenance
+
+To keep the installed charts on their latest published versions:
+
+```bash
+helm repo update
+
+export EKS_API_ENDPOINT="$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed 's|https://||')"
+export CILIUM_CHART_VERSION="$(helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}')"
+export CILIUM_DNSPROXY_CHART_VERSION="$(helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}')"
+export TETRAGON_CHART_VERSION="$(helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}')"
+export SPLUNK_OTEL_CHART_VERSION="$(helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}')"
+
+helm upgrade --install cilium isovalent/cilium --version "${CILIUM_CHART_VERSION}" \
+  --namespace kube-system -f examples/cilium-enterprise-values.yaml \
+  --set k8sServiceHost="${EKS_API_ENDPOINT}"
+
+helm upgrade --install cilium-dnsproxy isovalent/cilium-dnsproxy --version "${CILIUM_DNSPROXY_CHART_VERSION}" \
+  --namespace kube-system -f examples/cilium-dns-proxy-ha-values.yaml
+
+helm upgrade --install tetragon isovalent/tetragon --version "${TETRAGON_CHART_VERSION}" \
+  --namespace tetragon --create-namespace
+
+helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
+  --version "${SPLUNK_OTEL_CHART_VERSION}" \
+  --namespace otel-splunk --create-namespace \
+  -f examples/splunk-otel-isovalent.yaml
+```
+
+Avoid `--reuse-values` for `cilium` and `cilium-dnsproxy` when chasing the latest published charts. Helm can carry forward old computed image tags and leave the workloads on older `v1.18.x-cee.1` images even though the chart revision changed. Reapply the intended values file instead, then verify the live pod images.
+
+Upgrade Cilium and `cilium-dnsproxy` together. Keep the DNS proxy on the same chart train as Cilium instead of mixing versions.
 
 ## Verification
 
@@ -653,17 +725,30 @@ Run this comprehensive check:
 echo "=== Cluster Nodes ==="
 kubectl get nodes
 
+echo -e "\n=== Helm Release Status ==="
+helm status cilium -n kube-system
+helm status cilium-dnsproxy -n kube-system
+helm status tetragon -n tetragon
+helm status splunk-otel-collector -n otel-splunk
+
 echo -e "\n=== Cilium Components ==="
-kubectl get pods -n kube-system -l k8s-app=cilium
+kubectl get pods,ds,deploy,svc -n kube-system
 
 echo -e "\n=== Hubble Components ==="
 kubectl get pods -n kube-system | grep hubble
 
-echo -e "\n=== Tetragon ==="
-kubectl get pods -n tetragon
+echo -e "\n=== Isovalent Runtime Images ==="
+kubectl get ds cilium -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
+kubectl get ds cilium-dnsproxy -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
+kubectl get deploy cilium-operator hubble-relay -n kube-system -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{end}'
 
-echo -e "\n=== Splunk OTel Collector ==="
-kubectl get pods -n otel-splunk
+echo -e "\n=== Tetragon ==="
+kubectl get pods,ds,deploy,svc -n tetragon
+
+echo -e "\n=== Splunk OTel Collector Runtime ==="
+kubectl get pods,deploy,ds,svc,cm -n otel-splunk
+kubectl get instrumentation -A
+kubectl get deploy splunk-otel-collector splunk-otel-collector-operator -n otel-splunk -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{end}'
 ```
 
 ### Verify Metrics Endpoints
@@ -956,9 +1041,10 @@ This lab guide is provided for educational purposes.
 ---
 
 **Lab Guide Version:** 1.0  
-**Last Updated:** November 2025  
+**Last Updated:** March 2026  
 **Tested With:**
 - EKS 1.30
-- Cilium Enterprise 1.18.4
-- Tetragon 1.18.0
-- Splunk OpenTelemetry Collector 0.140.0
+- Cilium Enterprise 1.18.8
+- Cilium DNS Proxy HA 1.18.8
+- Tetragon 1.18.1
+- Splunk OpenTelemetry Collector chart 0.147.1

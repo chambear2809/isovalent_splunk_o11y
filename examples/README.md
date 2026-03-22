@@ -33,6 +33,8 @@ Before using these configuration files, you **must** replace the following place
 kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed 's|https://||'
 ```
 
+You can either replace the placeholder in the file or keep the repo copy unchanged and pass the endpoint at install time with `--set k8sServiceHost="${EKS_API_ENDPOINT}"`.
+
 **Example value:**
 ```
 79F5FA6349FF9D1DC9052A3140032E7A.gr7.us-east-1.eks.amazonaws.com
@@ -71,30 +73,62 @@ kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed
 After replacing the placeholders, use these files with the commands documented in the main [README.md](../README.md):
 
 ```bash
+# Refresh repos and resolve the latest chart versions from the official Helm repos
+helm repo update
+export CILIUM_CHART_VERSION="$(helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}')"
+export CILIUM_DNSPROXY_CHART_VERSION="$(helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}')"
+export TETRAGON_CHART_VERSION="$(helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}')"
+export SPLUNK_OTEL_CHART_VERSION="$(helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}')"
+
 # Create EKS cluster
 eksctl create cluster -f examples/cluster.yaml
 
 # Add node group
 eksctl create nodegroup -f examples/nodegroup.yaml
 
+export EKS_API_ENDPOINT="$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' | sed 's|https://||')"
+
 # Install Cilium Enterprise
 helm upgrade --install cilium isovalent/cilium \
-  --version 1.18.4 \
+  --version "${CILIUM_CHART_VERSION}" \
   --namespace kube-system \
-  -f examples/cilium-enterprise-values.yaml
+  -f examples/cilium-enterprise-values.yaml \
+  --set k8sServiceHost="${EKS_API_ENDPOINT}"
 
 # Install DNS Proxy HA
-helm upgrade --install cilium-dns-proxy-ha isovalent/cilium-dns-proxy-ha \
-  --version 1.18.0 \
+helm upgrade --install cilium-dnsproxy isovalent/cilium-dnsproxy \
+  --version "${CILIUM_DNSPROXY_CHART_VERSION}" \
   --namespace kube-system \
   -f examples/cilium-dns-proxy-ha-values.yaml
 
+# Install Tetragon
+helm upgrade --install tetragon isovalent/tetragon \
+  --version "${TETRAGON_CHART_VERSION}" \
+  --namespace tetragon --create-namespace
+
 # Install Splunk OpenTelemetry Collector
 helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
+  --version "${SPLUNK_OTEL_CHART_VERSION}" \
   --namespace otel-splunk \
   --create-namespace \
   -f examples/splunk-otel-isovalent.yaml
 ```
+
+**Note:** `cilium-dns-proxy-ha-values.yaml` is the values file name used in this repo, but the live Helm release and chart name are `cilium-dnsproxy`.
+**Upgrade note:** Avoid `--reuse-values` for `cilium` and `cilium-dnsproxy` when updating to a newer chart version. Reapply the repo values files so the live images move with the chart instead of staying pinned to older computed tags.
+
+## Current Runtime Shape
+
+Current cluster inventory observed on March 22, 2026:
+
+- `cilium` `1.18.8` in `kube-system`, with Cilium agents, Envoy, operator, Hubble Relay, Hubble Timescape, ServiceMonitors, and namespace `cilium-secrets`
+- `cilium-dnsproxy` `1.18.8` in `kube-system`, exposed on `9967/TCP`
+- `tetragon` `1.18.1` in `tetragon`, with daemonset, operator, and `TracingPolicy/l3l4networking`
+- `splunk-otel-collector` `0.147.1` in `otel-splunk`, with gateway deployment, agent daemonset, `k8s-cluster-receiver`, operator, cert-manager, `splunk-otel-collector-obi`, ConfigMaps, and `Instrumentation` resources
+
+`kubectl get opentelemetrycollectors -A` may still return no resources because the Splunk collector is chart-managed here rather than deployed through `OpenTelemetryCollector` custom resources.
+
+If `helm status splunk-otel-collector -n otel-splunk` reports `failed` while the workloads are still healthy, inspect the operator webhook and cert-manager resources before reinstalling. A failed upgrade can leave the previous collector stack running.
 
 ## Metric Filtering
 
@@ -131,7 +165,7 @@ Feel free to modify these files to match your environment:
 - Change cluster name and region in `cluster.yaml` and `nodegroup.yaml`
 - Adjust instance types and capacity in `nodegroup.yaml`
 - Modify Hubble metrics in `cilium-enterprise-values.yaml`
-- Update cluster name in `splunk-otel-isovalent.yaml` to match your deployment
+- Update cluster name and environment in `splunk-otel-isovalent.yaml` to match your deployment
 - Customize the metric filter list in `splunk-otel-isovalent.yaml` based on your monitoring needs
 
 ## Security Best Practices
