@@ -50,6 +50,8 @@ When the platform or packaging changes these labels, update the relabel rules. D
 - The repo is EKS-first, so distribution flags in `examples/splunk-otel-isovalent.yaml` are not automatically portable.
 - A Helm release can show `STATUS: failed` because of operator webhook or certificate errors while the existing collector pods and ConfigMaps still remain in service.
 - The chart can install OTel CRDs and `Instrumentation` resources without creating any `OpenTelemetryCollector` resources.
+- The chart can expose `instrumentation.spec` defaults without rendering or owning any `Instrumentation` resources in the release manifest. Prove ownership from `helm get manifest` and live metadata before treating Helm values as authoritative for those CRs.
+- A current chart release and a passing dry-run webhook probe do not guarantee the stored `Instrumentation` resources were reconciled. A separate `Instrumentation` CR may still be intentionally managed outside Helm.
 - The chart version does not guarantee the collector, operator, or OBI image tags numerically match the chart. Validate against rendered manifests instead of assuming equality.
 - Newer upgrades can fail on server-side apply ownership conflicts for webhook configurations. Confirm the chart-managed release should own those resources before retrying with `--force-conflicts`.
 - Stale namespace-level instrumentation defaults can block pod admission even when workloads do not carry their own `instrumentation.opentelemetry.io/*` annotations.
@@ -61,6 +63,7 @@ Resolve these before acting. Default to the user's stated intent and the values 
 - `examples/splunk-otel-isovalent.yaml`
   - `splunkObservability.accessToken`
   - `splunkObservability.realm`
+  - On an existing release, do not overwrite live values with these placeholders. Start from `helm get values splunk-otel-collector -n otel-splunk -o yaml` and merge the repo-specific receiver and filter intent into that file.
 - Any imported dashboard filters that still point at an old cluster name.
 
 ## Boundary With The Isovalent Skill

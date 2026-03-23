@@ -424,7 +424,7 @@ kubectl get pods -n kube-system | grep -E "(cilium|hubble)"
 ```
 
 **Expected Output:**
-- 2 nodes in `Ready` state
+- The number of nodes requested in your node group config are in `Ready` state (2 if you kept the sample file unchanged)
 - Cilium Agents running (1 per node)
 - Hubble relay and timescape running
 - Cilium operator running
@@ -645,7 +645,7 @@ operator:
 
 ### Step 12: Install Splunk OpenTelemetry Collector
 
-Install the collector using the example configuration file:
+For a fresh install, use the example configuration file:
 
 ```bash
 helm upgrade --install splunk-otel-collector \
@@ -667,6 +667,13 @@ Inspect the chart-managed runtime footprint:
 helm status splunk-otel-collector -n otel-splunk
 kubectl get deploy,ds,svc,cm -n otel-splunk
 kubectl get instrumentation -A
+manifest="$(helm get manifest splunk-otel-collector -n otel-splunk)"
+if printf '%s\n' "$manifest" | grep -q '^kind: Instrumentation$'; then
+  echo "Helm renders Instrumentation"
+else
+  echo "Helm does not render Instrumentation"
+fi
+kubectl get instrumentation -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,MANAGED_BY:.metadata.labels.app\.kubernetes\.io/managed-by,HELM_RELEASE:.metadata.annotations.meta\.helm\.sh/release-name,EXPORTER:.spec.exporter.endpoint'
 ```
 
 You should see:
@@ -676,9 +683,11 @@ You should see:
 - `Deployment/splunk-otel-collector-k8s-cluster-receiver`
 - `Deployment/splunk-otel-collector-operator`
 - Cert-manager resources
-- One or more `Instrumentation` resources
+- Possibly one or more live `Instrumentation` resources in app namespaces
 
-`kubectl get opentelemetrycollectors -A` may still return no resources because this repo uses the Helm chart's chart-managed collector layout instead of `OpenTelemetryCollector` custom resources.
+`kubectl get opentelemetrycollectors -A` may still return no resources because this repo uses chart-managed collector Deployments and DaemonSets instead of `OpenTelemetryCollector` custom resources. That still does not prove Helm owns any live `Instrumentation` CRs.
+
+Helm can expose `instrumentation.spec` defaults without rendering or owning any live `Instrumentation` resources. If `Helm renders Instrumentation` is false, or the live `MANAGED_BY` and `HELM_RELEASE` columns are empty, inspect the object YAML for `kubectl.kubernetes.io/last-applied-configuration` and treat those `Instrumentation` objects as separately managed cluster resources.
 
 If `helm status splunk-otel-collector -n otel-splunk` reports `failed` while these workloads are still healthy, inspect the operator webhook and cert-manager resources before reinstalling. A failed upgrade can leave the previous collector stack running.
 
@@ -705,15 +714,26 @@ helm upgrade --install cilium-dnsproxy isovalent/cilium-dnsproxy --version "${CI
 helm upgrade --install tetragon isovalent/tetragon --version "${TETRAGON_CHART_VERSION}" \
   --namespace tetragon --create-namespace
 
-helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
-  --version "${SPLUNK_OTEL_CHART_VERSION}" \
-  --namespace otel-splunk --create-namespace \
-  -f examples/splunk-otel-isovalent.yaml
+if helm status splunk-otel-collector -n otel-splunk >/dev/null 2>&1; then
+  helm get values splunk-otel-collector -n otel-splunk -o yaml > splunk-otel-live-values.yaml
+  echo "Merge the receiver and filter settings from examples/splunk-otel-isovalent.yaml into splunk-otel-live-values.yaml before upgrading."
+  helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
+    --version "${SPLUNK_OTEL_CHART_VERSION}" \
+    --namespace otel-splunk --create-namespace \
+    -f splunk-otel-live-values.yaml
+else
+  helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
+    --version "${SPLUNK_OTEL_CHART_VERSION}" \
+    --namespace otel-splunk --create-namespace \
+    -f examples/splunk-otel-isovalent.yaml
+fi
 ```
 
 Avoid `--reuse-values` for `cilium` and `cilium-dnsproxy` when chasing the latest published charts. Helm can carry forward old computed image tags and leave the workloads on older `v1.18.x-cee.1` images even though the chart revision changed. Reapply the intended values file instead, then verify the live pod images.
 
 Upgrade Cilium and `cilium-dnsproxy` together. Keep the DNS proxy on the same chart train as Cilium instead of mixing versions.
+
+On an existing Splunk release, do not blindly reapply `examples/splunk-otel-isovalent.yaml`. Preserve the live realm, token, and any cluster-specific overrides by starting from `helm get values splunk-otel-collector -n otel-splunk -o yaml`, then merge the repo's receiver and metric filter intent into that file before upgrading.
 
 ## Verification
 
@@ -763,7 +783,7 @@ kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | head -
 kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | head -20
 
 # Test Tetragon metrics
-kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | head -20
+kubectl get --raw '/api/v1/namespaces/tetragon/services/http:tetragon:metrics/proxy/metrics' | grep '^tetragon_' | head -20
 ```
 
 ### Verify Metrics Collection

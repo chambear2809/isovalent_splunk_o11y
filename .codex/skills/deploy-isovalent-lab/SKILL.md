@@ -45,6 +45,7 @@ Use this skill for the Isovalent side of the repo. If the task is primarily abou
 - Preserve Hubble Relay, Hubble Timescape, and the separate `cilium-dnsproxy` release when they already exist.
 - Do not default to `--reuse-values` for `cilium` or `cilium-dnsproxy` when upgrading to the latest chart versions. Reapply the intended values file or explicit live values so Helm does not preserve stale computed image tags.
 - Do not assume every Isovalent subcomponent image tag numerically matches the chart version. Compare live images against rendered manifests or chart defaults; Hubble Timescape can intentionally track its own tag inside the Cilium chart.
+- Do not pull Splunk collector settings such as `distribution` or `cloudProvider` into Isovalent chart values. Those belong to `deploy-splunk-o11y-lab`.
 - Prefer adapting an existing Cilium or Tetragon install over reinstalling it blindly.
 
 ## Validation Checklist

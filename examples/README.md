@@ -116,6 +116,7 @@ helm upgrade --install splunk-otel-collector splunk-otel-collector-chart/splunk-
 
 **Note:** `cilium-dns-proxy-ha-values.yaml` is the values file name used in this repo, but the live Helm release and chart name are `cilium-dnsproxy`.
 **Upgrade note:** Avoid `--reuse-values` for `cilium` and `cilium-dnsproxy` when updating to a newer chart version. Reapply the repo values files so the live images move with the chart instead of staying pinned to older computed tags.
+**Splunk upgrade note:** On an existing `splunk-otel-collector` release, start from `helm get values splunk-otel-collector -n otel-splunk -o yaml` and merge the repo's receiver and filter settings into that file before upgrading. Do not blindly reuse `examples/splunk-otel-isovalent.yaml` over live cluster-specific values.
 
 ## Current Runtime Shape
 
@@ -124,9 +125,11 @@ Current cluster inventory observed on March 22, 2026:
 - `cilium` `1.18.8` in `kube-system`, with Cilium agents, Envoy, operator, Hubble Relay, Hubble Timescape, ServiceMonitors, and namespace `cilium-secrets`
 - `cilium-dnsproxy` `1.18.8` in `kube-system`, exposed on `9967/TCP`
 - `tetragon` `1.18.1` in `tetragon`, with daemonset, operator, and `TracingPolicy/l3l4networking`
-- `splunk-otel-collector` `0.147.1` in `otel-splunk`, with gateway deployment, agent daemonset, `k8s-cluster-receiver`, operator, cert-manager, `splunk-otel-collector-obi`, ConfigMaps, and `Instrumentation` resources
+- `splunk-otel-collector` `0.147.1` in `otel-splunk`, with gateway deployment, agent daemonset, `k8s-cluster-receiver`, operator, cert-manager, `splunk-otel-collector-obi`, ConfigMaps, and separately applied `Instrumentation` resources in app namespaces
 
 `kubectl get opentelemetrycollectors -A` may still return no resources because the Splunk collector is chart-managed here rather than deployed through `OpenTelemetryCollector` custom resources.
+
+Helm can expose `instrumentation.spec` defaults without rendering or owning live `Instrumentation` resources. Prove ownership with `helm get manifest splunk-otel-collector -n otel-splunk` plus the live object metadata before reconciling any `Instrumentation` CRs.
 
 If `helm status splunk-otel-collector -n otel-splunk` reports `failed` while the workloads are still healthy, inspect the operator webhook and cert-manager resources before reinstalling. A failed upgrade can leave the previous collector stack running.
 
@@ -155,7 +158,7 @@ kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | grep "
 kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | grep "^hubble_"
 
 # View all Tetragon metrics
-kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | grep "^tetragon_"
+kubectl get --raw '/api/v1/namespaces/tetragon/services/http:tetragon:metrics/proxy/metrics' | grep "^tetragon_"
 ```
 
 ## Customization

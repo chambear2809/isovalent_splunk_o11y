@@ -367,9 +367,20 @@ helm upgrade --install splunk-otel-collector \
   -n otel-splunk --create-namespace \
   -f examples/splunk-otel-isovalent.yaml
 
+# Existing release: preserve live values before upgrading
+helm get values splunk-otel-collector -n otel-splunk -o yaml > splunk-otel-live-values.yaml
+# Merge the receiver and filter settings from examples/splunk-otel-isovalent.yaml into splunk-otel-live-values.yaml before using it for an upgrade.
+
 helm status splunk-otel-collector -n otel-splunk
 kubectl get deploy,ds,svc,cm -n otel-splunk
 kubectl get instrumentation -A
+manifest="$(helm get manifest splunk-otel-collector -n otel-splunk)"
+if printf '%s\n' "$manifest" | grep -q '^kind: Instrumentation$'; then
+  echo "Helm renders Instrumentation"
+else
+  echo "Helm does not render Instrumentation"
+fi
+kubectl get instrumentation -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,MANAGED_BY:.metadata.labels.app\.kubernetes\.io/managed-by,HELM_RELEASE:.metadata.annotations.meta\.helm\.sh/release-name,EXPORTER:.spec.exporter.endpoint'
 kubectl get ds cilium -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
 kubectl get ds cilium-dnsproxy -n kube-system -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
 kubectl get deploy splunk-otel-collector splunk-otel-collector-operator -n otel-splunk -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{end}'
@@ -394,7 +405,7 @@ kubectl get instrumentation -A
 ```bash
 kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | head -20
 kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | head -20
-kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | head -20
+kubectl get --raw '/api/v1/namespaces/tetragon/services/http:tetragon:metrics/proxy/metrics' | grep '^tetragon_' | head -20
 ```
 
 ### Check OTel Collector Logs
@@ -444,10 +455,15 @@ helm status splunk-otel-collector -n otel-splunk
 
 # Re-resolve latest published chart versions before upgrading
 helm repo update
-helm search repo isovalent/cilium --versions | head -n 3
-helm search repo isovalent/cilium-dnsproxy --versions | head -n 3
-helm search repo isovalent/tetragon --versions | head -n 3
-helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | head -n 3
+export CILIUM_CHART_VERSION="$(helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}')"
+export CILIUM_DNSPROXY_CHART_VERSION="$(helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}')"
+export TETRAGON_CHART_VERSION="$(helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}')"
+export SPLUNK_OTEL_CHART_VERSION="$(helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}')"
+printf 'cilium=%s\ncilium-dnsproxy=%s\ntetragon=%s\nsplunk-otel-collector=%s\n' \
+  "${CILIUM_CHART_VERSION}" \
+  "${CILIUM_DNSPROXY_CHART_VERSION}" \
+  "${TETRAGON_CHART_VERSION}" \
+  "${SPLUNK_OTEL_CHART_VERSION}"
 
 # Check service discovery
 kubectl get pods -n kube-system -l k8s-app=cilium -o wide

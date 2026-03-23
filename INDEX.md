@@ -160,17 +160,17 @@ kubectl logs -n otel-splunk -l app=splunk-otel-collector --tail=50 | grep cilium
 | Component | Version | Purpose |
 |-----------|---------|---------|
 | Amazon EKS | 1.30 | Kubernetes cluster |
-| Cilium | 1.18.4 | CNI + Networking |
+| Cilium | 1.18.8 | CNI + Networking |
 | Hubble | Included | Network observability |
-| Tetragon | 1.18.0 | Runtime security |
-| Splunk OTel Collector | 0.140.0 | Metrics collection |
+| Tetragon | 1.18.1 | Runtime security |
+| Splunk OTel Collector chart | 0.147.1 | Metrics collection |
 | Prometheus Operator CRDs | 0.68.0 | Metrics monitoring |
 
 ## 💰 Cost Considerations
 
 ### AWS Costs
 - **EKS Control Plane**: ~$73/month
-- **EC2 Nodes (2x m5.xlarge)**: ~$280/month
+- **Sample EC2 Nodes (2x m5.xlarge from `examples/nodegroup.yaml`)**: ~$280/month
 - **Data Transfer**: Variable
 - **EBS Volumes**: ~$20/month
 
@@ -263,6 +263,13 @@ Found an issue or have improvements?
 - Share your experience
 
 ## 🔄 Updates & Changelog
+
+### Version 1.1 (March 2026)
+- Updated public docs to match the live cluster and upgrade workflow
+- Cilium 1.18.8
+- Tetragon 1.18.1
+- Splunk OTel Collector chart 0.147.1
+- Documented live `Instrumentation` ownership checks and safer Splunk upgrades
 
 ### Version 1.0 (November 2025)
 - Initial release

@@ -24,7 +24,9 @@ Use this skill for the Splunk Observability side of the repo. If the task change
    - Check namespaces, Helm releases and release status, collector ConfigMaps, installed CRDs, `Instrumentation` resources, and running collector or Operator workloads.
    - Confirm whether the `splunk-otel-collector` release has created the gateway deployment, agent DaemonSet, `k8s-cluster-receiver`, Operator, cert-manager, and webhook resources.
    - Refresh the Helm repos and compare the installed chart version to the latest official Splunk chart version before deciding whether to upgrade.
-   - Audit both namespace and workload `instrumentation.opentelemetry.io/*` annotations, and keep a real `Instrumentation` object handy for server-side dry-run webhook checks when admission health is in doubt.
+   - Capture live Helm values for existing releases before upgrading, then audit namespace and workload `instrumentation.opentelemetry.io/*` annotations across Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs.
+   - Keep a real `Instrumentation` object handy for server-side dry-run webhook checks when admission health is in doubt.
+   - Determine whether live `Instrumentation` resources are Helm-managed, operator-upgraded, or separately applied. Check Helm manifest output, owner references, Helm metadata, and live annotations before deciding what should reconcile them.
    - Do not treat Helm `STATUS: failed` as proof the collector is absent. Upgrade failures can leave the existing collector stack running.
 3. Reuse repo artifacts.
    - Treat `examples/splunk-otel-isovalent.yaml` and the dashboard JSON files as the source of truth.
@@ -41,9 +43,12 @@ Use this skill for the Splunk Observability side of the repo. If the task change
 - Preserve the curated metric filter unless the user explicitly wants a broader export.
 - Preserve the repo's explicit Prometheus receivers and relabel rules unless the platform changes namespaces, labels, or chart packaging.
 - Resolve the latest Splunk chart version from the official Helm repo at runtime instead of trusting stale hard-coded pins.
+- Do not blindly reapply `examples/splunk-otel-isovalent.yaml` over an existing release. Start from `helm get values splunk-otel-collector -n otel-splunk -o yaml` and merge the repo-specific receiver and filter intent into those live values.
 - If enabling OpenTelemetry auto-instrumentation, make sure the Operator and `Instrumentation` resources exist before annotating workloads.
 - Match `Instrumentation` annotation values to real objects before restarting workloads.
 - Namespace-level instrumentation defaults can break pod admission even when workloads are unannotated. Audit namespaces as well as workloads.
+- Do not assume the Splunk chart owns `Instrumentation` resources just because Helm values include an `instrumentation.spec` block. Prove ownership from rendered manifests or live metadata first.
+- Do not stop at a successful server-side dry-run webhook probe. Also verify the stored `Instrumentation` resources are intentionally configured for their real owner and namespace policy.
 - Do not assume `OpenTelemetryCollector` custom resources exist; this repo can be chart-managed with ConfigMaps plus `Instrumentation` resources only.
 - Do not assume the Splunk chart version equals the collector, operator, or optional OBI image tags. Compare live images against rendered manifests or chart defaults.
 - If a Helm upgrade hits server-side apply ownership conflicts on webhook configurations, verify the chart-managed release is the intended owner before retrying with `--force-conflicts`.
@@ -53,9 +58,12 @@ Use this skill for the Splunk Observability side of the repo. If the task change
 
 - The rendered collector config still contains the `prometheus/isovalent_*` receivers and the include filter.
 - `clusterName`, `environment`, realm, and token values match the target deployment.
+- Upgrade inputs preserve or intentionally change the live Helm values for realm, token, and other release-specific settings.
 - Helm status and runtime state agree, or any mismatch is explained before changing the release.
 - Collector, gateway, agent, and Operator pods rolled out cleanly.
 - A server-side dry-run annotation against a real `Instrumentation` object succeeds after Operator or cert-manager changes, or any failure is explained.
+- The ownership model for each live `Instrumentation` resource is explained: Helm-rendered, operator-upgraded, or separately applied.
+- Live `Instrumentation` specs are intentionally configured for their real source of truth instead of being compared blindly to Helm values.
 - Live collector, operator, agent, and optional OBI images match the rendered chart expectations.
 - Namespace or workload annotations still point at real `Instrumentation` resources.
 - Dashboard JSON imports do not contain stale cluster filters for a different cluster name.

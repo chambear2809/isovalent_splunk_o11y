@@ -231,7 +231,7 @@ graph TB
 
 ### Amazon EKS Layer
 - **Control Plane**: Managed Kubernetes 1.30
-- **Worker Nodes**: 2x m5.xlarge instances in private subnets
+- **Worker Nodes**: Example node group uses 2x m5.xlarge instances in private subnets; live clusters may scale beyond this sample
 - **Networking**: VPC with multi-AZ deployment
 - **IAM**: OIDC provider for service accounts
 

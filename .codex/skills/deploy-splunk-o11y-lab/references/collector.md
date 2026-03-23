@@ -27,18 +27,21 @@ Inventory these resources first:
 - `Deployment/splunk-otel-collector-operator`
 - The operator webhook services and cert-manager resources
 - The rendered ConfigMaps for the agent, gateway, and cluster receiver
-- `Instrumentation` resources used by app namespaces
+- `Instrumentation` resources used by app namespaces, including their live metadata, `spec.exporter.endpoint`, propagators, and auto-instrumentation images
 
 It is valid for `kubectl get opentelemetrycollectors -A` to return no resources in this repo.
+It is also valid for the Helm chart to expose `instrumentation.spec` defaults without rendering or owning any `Instrumentation` resources in the release manifest.
 
 ## Chart Version Maintenance
 
 To keep the Splunk collector current:
 
 - Run `helm repo update`.
-- Resolve the latest chart version with `helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | head -n 3`.
+- Resolve the latest chart version with `helm search repo splunk-otel-collector-chart/splunk-otel-collector --versions | awk 'NR==2 {print $2}'`.
 - Compare that result to `helm status splunk-otel-collector -n otel-splunk`.
-- Upgrade with the existing values file only after confirming the current runtime is healthy enough to carry the change.
+- If the release already exists, capture `helm get values splunk-otel-collector -n otel-splunk -o yaml` first and merge the repo's receiver and filter intent into those live values before upgrading.
+- Upgrade with the chosen values file only after confirming the current runtime is healthy enough to carry the change.
+- Do not blindly reapply `examples/splunk-otel-isovalent.yaml` over an existing release; it contains placeholders and may not reflect live realm, token, or other release-specific settings.
 - Do not assume the chart version numerically matches the collector or operator image tags. Validate against rendered manifests or live pod images.
 
 ## Metric Filter Intent
@@ -74,11 +77,14 @@ When application tracing is in scope:
 - Keep `operator.enabled: true`.
 - Install CRDs if needed with `operatorcrds.install: true`.
 - Ensure `Instrumentation` objects exist before the workload rollout.
-- Inspect both namespace annotations and workload pod-template annotations for `instrumentation.opentelemetry.io/*`; workload annotations override namespace defaults.
+- Inspect both namespace annotations and workload pod-template annotations for `instrumentation.opentelemetry.io/*` across Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs; workload annotations override namespace defaults.
 - Annotation values can be `true`, a same-namespace instrumentation name, or a `namespace/name` reference. Match them to real objects before restarting workloads.
 - Match the exporter protocol and port to the real `Instrumentation.spec.exporter.endpoint` instead of hardcoding OTLP HTTP `:4318`.
+- Determine ownership before comparing intent. Use `helm get manifest splunk-otel-collector -n otel-splunk` plus live metadata to decide whether each `Instrumentation` resource is Helm-rendered, operator-upgraded, or separately applied.
+- If the chart does not render `Instrumentation` resources, do not treat `helm get values ... -a` as authoritative for the live `Instrumentation` specs. Use the live CRs, their metadata, and explicit namespace intent as the source of truth.
 - A stale namespace annotation can block unrelated pod admissions even if the workload itself is not annotated. Clear invalid namespace defaults before blaming the Operator.
 - When webhook or certificate health is in doubt, set `NS` and `INSTRUMENTATION` to a real object and probe admission with `kubectl annotate instrumentation -n "$NS" "$INSTRUMENTATION" skill-probe=$(date +%s) --overwrite --dry-run=server -o yaml`.
+- A passing server-side dry-run only proves the webhook currently accepts changes. It does not prove a previous failed `instrumentation-upgrade` reconciled the existing `Instrumentation` objects or that Helm owns them.
 
 ## Platform Toggles
 
@@ -107,7 +113,8 @@ When the collector is not ingesting the expected metrics:
 5. Verify label selectors in relabeling still match the running pods.
 6. Check collector and operator logs for scrape failures, TLS issues, webhook certificate errors, or rejected configs.
 7. Right after an operator rollout, treat TLS handshake or `instrumentation-upgrade` errors as possibly transient until the webhook certificates reload. Re-run the server-side dry-run annotation before rollback.
-8. Confirm the filter still includes the metric names you expect and that annotation targets still resolve to real `Instrumentation` objects.
+8. After admission recovers, determine whether the `Instrumentation` resources are Helm-rendered or separately applied. If they are separate resources, reconcile them to explicit namespace intent instead of blindly forcing current Helm defaults over them.
+9. Confirm the filter still includes the metric names you expect and that annotation targets still resolve to real `Instrumentation` objects.
 
 If the underlying Isovalent components are missing or misconfigured, switch to `deploy-isovalent-lab` before widening or restructuring the telemetry pipeline.
 

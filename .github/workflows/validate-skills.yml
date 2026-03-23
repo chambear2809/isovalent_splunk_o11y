@@ -1,0 +1,36 @@
+name: Validate Docs And Skills
+
+on:
+  push:
+    paths:
+      - ".codex/skills/**"
+      - "README.md"
+      - "QUICK_REFERENCE.md"
+      - "INDEX.md"
+      - "ARCHITECTURE.md"
+      - "examples/README.md"
+      - "tests/*.sh"
+      - ".github/workflows/validate-skills.yml"
+  pull_request:
+    paths:
+      - ".codex/skills/**"
+      - "README.md"
+      - "QUICK_REFERENCE.md"
+      - "INDEX.md"
+      - "ARCHITECTURE.md"
+      - "examples/README.md"
+      - "tests/*.sh"
+      - ".github/workflows/validate-skills.yml"
+
+jobs:
+  validate-docs-and-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run skill validation
+        run: bash tests/validate_skills.sh
+
+      - name: Run project doc validation
+        run: bash tests/validate_project_docs.sh

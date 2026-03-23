@@ -26,14 +26,16 @@ Before changing anything, check:
 - `helm get values cilium -n kube-system -o yaml`
 - `helm get values cilium -n kube-system -a -o yaml`
 - `helm get values cilium-dnsproxy -n kube-system -o yaml`
-- `helm search repo isovalent/cilium --versions | head -n 3`
-- `helm search repo isovalent/cilium-dnsproxy --versions | head -n 3`
-- `helm search repo isovalent/tetragon --versions | head -n 3`
+- `helm get values cilium-dnsproxy -n kube-system -a -o yaml`
+- `helm search repo isovalent/cilium --versions | awk 'NR==2 {print $2}'`
+- `helm search repo isovalent/cilium-dnsproxy --versions | awk 'NR==2 {print $2}'`
+- `helm search repo isovalent/tetragon --versions | awk 'NR==2 {print $2}'`
 - `kubectl get pods,ds,deploy,svc -n kube-system`
 - `kubectl get pods,ds,deploy,svc -n tetragon`
 - `kubectl get crd | egrep 'ciliumnetworkpolicies|servicemonitors'`
 - `kubectl get servicemonitor -n kube-system`
 
+If a release does not exist yet, skip `helm status` and `helm get values` for that release and treat the task as a fresh install path.
 If Cilium or Tetragon already exist, prefer `helm upgrade` over reinstall, but do not blindly use `--reuse-values` when the goal is to move to the latest published Isovalent charts.
 If the repo example values still match the live user-supplied values, reapply the example files directly and inject the live `k8sServiceHost` for EKS.
 If older docs disagree about DNS proxy naming or versions, trust the live release state first and align the chart version to the running Cilium version.
@@ -59,8 +61,6 @@ Key EKS-only settings to preserve:
 - `routingMode: native`
 - `kubeProxyReplacement: "true"`
 - `k8sServiceHost` and `k8sServicePort`
-- `distribution: eks`
-- `cloudProvider: aws`
 
 ## Generic Kubernetes Adaptation
 
@@ -74,7 +74,7 @@ If the cluster is not EKS:
   - `k8sServicePort`
   - Any assumption that Cilium manages AWS ENIs.
 - Keep the Hubble, Envoy, operator, and ServiceMonitor settings only if the target Cilium packaging supports them.
-- Do not carry over `distribution: eks` or `cloudProvider: aws` unless the target platform explicitly matches them.
+- Do not pull Splunk collector settings such as `distribution: eks` or `cloudProvider: aws` into Isovalent values. Those belong to `deploy-splunk-o11y-lab`.
 
 For a generic cluster, the safest move is usually:
 
@@ -126,6 +126,6 @@ Validate with:
 - `kubectl logs -n kube-system deploy/hubble-relay --tail=100`
 - `kubectl exec -n kube-system ds/cilium -- curl -s localhost:9962/metrics | head`
 - `kubectl exec -n kube-system ds/cilium -- curl -s localhost:9965/metrics | head`
-- `kubectl exec -n tetragon ds/tetragon -- curl -s localhost:2112/metrics | head`
+- `kubectl get --raw '/api/v1/namespaces/tetragon/services/http:tetragon:metrics/proxy/metrics' | grep '^tetragon_' | head`
 
 If the repo's expected namespaces or labels do not match the running cluster, keep the Isovalent install consistent first and then hand off selector updates to `deploy-splunk-o11y-lab`.
